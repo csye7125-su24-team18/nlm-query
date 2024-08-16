@@ -13,3 +13,8 @@ uvicorn
 langchain-openai
 sqlalchemy
 psycopg2-binary
+langchain_core
+pinecone
+transformers
+langchain_community
+sentence-transformers
