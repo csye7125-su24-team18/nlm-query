@@ -131,7 +131,7 @@ qa = RetrievalQA.from_chain_type(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Update this to match your React frontend URL
+    allow_origins=[os.environ.get("FE")],  # Update this to match your React frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -155,4 +155,4 @@ def ask_question(request: QueryRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=os.environ.get("HOST"), port=os.environ.get("PORT"))
