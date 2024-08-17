@@ -18,3 +18,4 @@ pinecone
 transformers
 langchain_community
 sentence-transformers
+streamlit
