@@ -8,7 +8,6 @@ from langchain_openai import OpenAIEmbeddings
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from langchain_core.documents import Document
-from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import Pinecone as PineconeVectorStore
 from langchain.chains import RetrievalQA
 from pinecone import Pinecone, ServerlessSpec
@@ -36,7 +35,7 @@ class QueryRequest(BaseModel):
 # Customizable URL and port via environment variables
 FASTAPI_HOST = os.getenv("HOST", "localhost")
 FASTAPI_PORT = int(os.getenv("PORT", 8000))
-FRONTEND_URL = f"http://{HOST}:{PORT}/ask"
+FRONTEND_URL = f"http://{FASTAPI_HOST}:{FASTAPI_PORT}/ask"
 
 def read_json_files(directory):
     documents = []
@@ -162,54 +161,10 @@ def ask_question(request: QueryRequest):
         logger.error(f"Error processing question: {str(e)}")
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
-def run_fastapi():
-    uvicorn.run(app, host=FASTAPI_HOST, port=FASTAPI_PORT)
+
 
 # Streamlit app setup
-def run_streamlit():
-    st.title("Chat with CVE Bot")
-    api_endpoint = FRONTEND_URL
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    def chat():
-        user_input = st.text_input("You:", key="input")
-
-        if user_input:
-            st.session_state.messages.append({"user": user_input})
-            
-            # Send request to FastAPI backend
-            try:
-                response = requests.post(api_endpoint, json={"question": user_input})
-                if response.status_code == 200:
-                    bot_response = response.json().get("answer", "Sorry, I couldn't find an answer.")
-                else:
-                    bot_response = "Error: Could not fetch response from the server."
-            except requests.exceptions.RequestException as e:
-                bot_response = f"Error: {str(e)}"
-
-            st.session_state.messages.append({"bot": bot_response})
-            st.experimental_rerun()
-
-    # Display chat messages
-    for message in st.session_state.messages:
-        if "user" in message:
-            st.markdown(f"**You:** {message['user']}")
-        elif "bot" in message:
-            st.markdown(f"**Bot:** {message['bot']}")
-
-    # Chat input box
-    if st.button("Send", on_click=chat):
-        chat()
 
 if __name__ == "__main__":
-    # Run both FastAPI and Streamlit in parallel
-    fastapi_thread = Thread(target=run_fastapi)
-    streamlit_thread = Thread(target=run_streamlit)
-
-    fastapi_thread.start()
-    streamlit_thread.start()
-
-    fastapi_thread.join()
-    streamlit_thread.join()
+    import uvicorn
+    uvicorn.run(app, host=FASTAPI_HOST, port=FASTAPI_PORT)
