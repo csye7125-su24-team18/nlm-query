@@ -2,7 +2,7 @@ import os
 import json
 import time
 import logging
-import streamlit as st
+import requests
 from fastapi import FastAPI, HTTPException
 from langchain_openai import OpenAIEmbeddings
 from pydantic import BaseModel
@@ -15,7 +15,10 @@ from pinecone import Pinecone, ServerlessSpec
 from fastapi.middleware.cors import CORSMiddleware
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, pipeline
 from langchain_community.llms import HuggingFacePipeline
+import streamlit as st
 import uvicorn
+from threading import Thread
+
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -26,9 +29,14 @@ load_dotenv()
 # Initialize FastAPI app
 app = FastAPI()
 
-# Define the request model
+# Define the request model for FastAPI
 class QueryRequest(BaseModel):
     question: str
+
+# Customizable URL and port via environment variables
+FASTAPI_HOST = os.getenv("HOST", "localhost")
+FASTAPI_PORT = int(os.getenv("PORT", 8000))
+FRONTEND_URL = f"http://{HOST}:{PORT}/ask"
 
 def read_json_files(directory):
     documents = []
@@ -103,14 +111,11 @@ docs = read_json_files('cve')
 chunked_documents = chunk_data(docs)
 
 # Initialize embeddings
-# embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/multi-qa-mpnet-base-dot-v1")
 embeddings = OpenAIEmbeddings(api_key=os.environ['OPENAI_API_KEY'])
 documents = [Document(page_content=str(chunk), metadata={}) for chunk in chunked_documents]
 
-
 # Create Pinecone vector store
 pinecone_store = PineconeVectorStore.from_existing_index(
-
     index_name=index_name,
     embedding=embeddings
 )
@@ -135,7 +140,7 @@ qa = RetrievalQA.from_chain_type(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.environ.get("FE")],  # Update this to match your React frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -158,13 +163,12 @@ def ask_question(request: QueryRequest):
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
 def run_fastapi():
-   
-    uvicorn.run(app, host=os.environ.get("HOST"), port=int(os.environ.get("PORT")))
+    uvicorn.run(app, host=FASTAPI_HOST, port=FASTAPI_PORT)
 
 # Streamlit app setup
 def run_streamlit():
     st.title("Chat with CVE Bot")
-    api_endpoint = "http://localhost:8000/ask"
+    api_endpoint = FRONTEND_URL
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
