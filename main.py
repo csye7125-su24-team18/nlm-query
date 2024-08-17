@@ -2,7 +2,9 @@ import os
 import json
 import time
 import logging
+import streamlit as st
 from fastapi import FastAPI, HTTPException
+from langchain_openai import OpenAIEmbeddings
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from langchain_core.documents import Document
@@ -13,7 +15,7 @@ from pinecone import Pinecone, ServerlessSpec
 from fastapi.middleware.cors import CORSMiddleware
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, pipeline
 from langchain_community.llms import HuggingFacePipeline
-
+import uvicorn
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -81,7 +83,7 @@ def initialize_pinecone():
         logger.info(f"Creating new index: {index_name}")
         pc.create_index(
             name=index_name,
-            dimension=768,  # Adjust dimension according to the embedding model used
+            dimension=1536,  # Adjust dimension according to the embedding model used
             metric='cosine',
             spec=ServerlessSpec(
                 cloud='aws',
@@ -101,22 +103,24 @@ docs = read_json_files('cve')
 chunked_documents = chunk_data(docs)
 
 # Initialize embeddings
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/multi-qa-mpnet-base-dot-v1")
+# embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/multi-qa-mpnet-base-dot-v1")
+embeddings = OpenAIEmbeddings(api_key=os.environ['OPENAI_API_KEY'])
+documents = [Document(page_content=str(chunk), metadata={}) for chunk in chunked_documents]
 
-documents = [Document(page_content=chunk) for chunk in chunked_documents]
 
 # Create Pinecone vector store
 pinecone_store = PineconeVectorStore.from_existing_index(
+
     index_name=index_name,
     embedding=embeddings
 )
 
 # Initialize HuggingFacePipeline for LLM
-model_id = "google/flan-t5-base"
+model_id = "google/flan-t5-large"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
 hf_pipeline = pipeline(
-    "text2text-generation", model=model, tokenizer=tokenizer, max_length=100
+    "text2text-generation", model=model, tokenizer=tokenizer, max_new_tokens=512
 )
 
 llm = HuggingFacePipeline(pipeline=hf_pipeline)
@@ -153,6 +157,55 @@ def ask_question(request: QueryRequest):
         logger.error(f"Error processing question: {str(e)}")
         raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
+def run_fastapi():
+   
+    uvicorn.run(app, host=os.environ.get("HOST"), port=int(os.environ.get("PORT")))
+
+# Streamlit app setup
+def run_streamlit():
+    st.title("Chat with CVE Bot")
+    api_endpoint = "http://localhost:8000/ask"
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    def chat():
+        user_input = st.text_input("You:", key="input")
+
+        if user_input:
+            st.session_state.messages.append({"user": user_input})
+            
+            # Send request to FastAPI backend
+            try:
+                response = requests.post(api_endpoint, json={"question": user_input})
+                if response.status_code == 200:
+                    bot_response = response.json().get("answer", "Sorry, I couldn't find an answer.")
+                else:
+                    bot_response = "Error: Could not fetch response from the server."
+            except requests.exceptions.RequestException as e:
+                bot_response = f"Error: {str(e)}"
+
+            st.session_state.messages.append({"bot": bot_response})
+            st.experimental_rerun()
+
+    # Display chat messages
+    for message in st.session_state.messages:
+        if "user" in message:
+            st.markdown(f"**You:** {message['user']}")
+        elif "bot" in message:
+            st.markdown(f"**Bot:** {message['bot']}")
+
+    # Chat input box
+    if st.button("Send", on_click=chat):
+        chat()
+
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host=os.environ.get("HOST"), port=os.environ.get("PORT"))
+    # Run both FastAPI and Streamlit in parallel
+    fastapi_thread = Thread(target=run_fastapi)
+    streamlit_thread = Thread(target=run_streamlit)
+
+    fastapi_thread.start()
+    streamlit_thread.start()
+
+    fastapi_thread.join()
+    streamlit_thread.join()
